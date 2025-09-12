@@ -15,8 +15,6 @@ const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:8090";
 
 // Middleware
 app.use(express.json());
-import cors from "cors";
-
 app.use(
   cors({
     origin: [
@@ -26,7 +24,6 @@ app.use(
     credentials: true,
   })
 );
-
 
 // MongoDB Connection
 mongoose
