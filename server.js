@@ -15,12 +15,18 @@ const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:8090";
 
 // Middleware
 app.use(express.json());
+import cors from "cors";
+
 app.use(
   cors({
-    origin: [CLIENT_URL, "http://localhost:8090"],
+    origin: [
+      "http://localhost:8090",   // allow local frontend
+      "https://patient-frontend-txxi.vercel.app" // allow deployed frontend
+    ],
     credentials: true,
   })
 );
+
 
 // MongoDB Connection
 mongoose
