@@ -18,12 +18,14 @@ app.use(express.json());
 app.use(
   cors({
     origin: [
-      "http://localhost:8090",   // allow local frontend
-      "https://patient-frontend-txxi.vercel.app" // allow deployed frontend
+      "http://localhost:8080",  // ✅ allow frontend running on 8080
+      "http://localhost:8090",  // ✅ allow frontend running on 8090
+      "https://patient-frontend-txxi.vercel.app" // ✅ deployed frontend
     ],
     credentials: true,
   })
 );
+
 
 // MongoDB Connection
 mongoose
