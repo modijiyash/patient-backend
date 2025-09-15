@@ -9,23 +9,22 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10001;
-const MONGO_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/elderEase";
+const MONGO_URI =
+  process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/elderEase";
 const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key";
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:8090";
 
 // Middleware
 app.use(express.json());
 app.use(
   cors({
     origin: [
-      "http://localhost:8080",  // ✅ allow frontend running on 8080
-      "http://localhost:8090",  // ✅ allow frontend running on 8090
-      "https://patient-frontend-txxi.vercel.app" // ✅ deployed frontend
+      "http://localhost:8080",
+      "http://localhost:8090",
+      "https://patient-frontend-txxi.vercel.app",
     ],
     credentials: true,
   })
 );
-
 
 // MongoDB Connection
 mongoose
@@ -36,7 +35,9 @@ mongoose
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Schemas
+/* ================================
+   SCHEMAS & MODELS
+================================ */
 const PatientSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -59,25 +60,60 @@ const PatientSchema = new mongoose.Schema(
 
 const AppointmentSchema = new mongoose.Schema(
   {
-    patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient", default: null },
+    patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient" },
     patientName: { type: String, required: true },
     doctor: { type: String, default: "Unassigned" },
     date: { type: String, required: true },
     time: { type: String, required: true },
     reason: { type: String, default: "" },
-    status: { type: String, enum: ["pending", "confirmed", "completed", "cancelled"], default: "pending" },
+    status: {
+      type: String,
+      enum: ["pending", "confirmed", "completed", "cancelled"],
+      default: "pending",
+    },
   },
   { collection: "appointments", timestamps: true }
 );
 
-// Models
-const Patient = mongoose.models.Patient || mongoose.model("Patient", PatientSchema);
-const Appointment = mongoose.models.Appointment || mongoose.model("Appointment", AppointmentSchema);
+const GeofenceSchema = new mongoose.Schema(
+  {
+    patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient", required: true },
+    geofence: { lat: Number, lng: Number },
+    currentLocation: { lat: Number, lng: Number },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { collection: "geofences" }
+);
 
-// Auth Helpers
+const AlertSchema = new mongoose.Schema(
+  {
+    patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient", required: true },
+    type: { type: String, enum: ["geofence", "sos"], required: true },
+    message: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { collection: "alerts" }
+);
+
+// Models
+const Patient =
+  mongoose.models.Patient || mongoose.model("Patient", PatientSchema);
+const Appointment =
+  mongoose.models.Appointment || mongoose.model("Appointment", AppointmentSchema);
+const Geofence =
+  mongoose.models.Geofence || mongoose.model("Geofence", GeofenceSchema);
+const Alert =
+  mongoose.models.Alert || mongoose.model("Alert", AlertSchema);
+
+/* ================================
+   AUTH HELPERS
+================================ */
 function parseAuthToken(req) {
-  const authHeader = req.headers.authorization || req.headers["x-access-token"] || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+  const authHeader =
+    req.headers.authorization || req.headers["x-access-token"] || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
   if (!token) return null;
   try {
     return jwt.verify(token, JWT_SECRET);
@@ -89,16 +125,25 @@ function parseAuthToken(req) {
 const authMiddleware = (roles = []) => {
   return (req, res, next) => {
     const decoded = parseAuthToken(req);
-    if (!decoded) return res.status(403).json({ status: "error", message: "No token or invalid token" });
-    if (roles.length && !roles.includes(decoded.role)) return res.status(403).json({ status: "error", message: "Access denied" });
+    if (!decoded)
+      return res
+        .status(403)
+        .json({ status: "error", message: "No token or invalid token" });
+    if (roles.length && !roles.includes(decoded.role))
+      return res
+        .status(403)
+        .json({ status: "error", message: "Access denied" });
     req.user = decoded;
     next();
   };
 };
 
-// Routes
+/* ================================
+   ROUTES
+================================ */
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+/* ---------- AUTH ---------- */
 app.post("/signup", async (req, res) => {
   try {
     const { name, email, password, confirmPassword, age, gender, phone } = req.body;
@@ -121,7 +166,15 @@ app.post("/signup", async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
 
-    const patient = await Patient.create({ name, email, password: hashed, age, gender, phone, status: "new" });
+    const patient = await Patient.create({
+      name,
+      email,
+      password: hashed,
+      age,
+      gender,
+      phone,
+      status: "new",
+    });
 
     res.json({
       status: "ok",
@@ -145,7 +198,8 @@ app.post("/signup", async (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ status: "error", message: "Email and password required" });
+    if (!email || !password)
+      return res.status(400).json({ status: "error", message: "Email and password required" });
 
     const patient = await Patient.findOne({ email });
     if (!patient) return res.status(404).json({ status: "error", message: "Patient not found" });
@@ -174,25 +228,18 @@ app.post("/login", async (req, res) => {
   }
 });
 
+/* ---------- PROFILE ---------- */
 app.get("/profile", authMiddleware(["patient"]), async (req, res) => {
   try {
     const patient = await Patient.findById(req.user.id).select("-password");
     if (!patient) return res.status(404).json({ status: "error", message: "Patient not found" });
     res.json({ status: "ok", user: patient });
-  } catch (err) {
+  } catch {
     res.status(500).json({ status: "error", message: "Server error" });
   }
 });
 
-app.get("/patients", authMiddleware(["doctor"]), async (_req, res) => {
-  try {
-    const patients = await Patient.find().select("-password");
-    res.json({ status: "ok", patients });
-  } catch (err) {
-    res.status(500).json({ status: "error", message: "Server error" });
-  }
-});
-
+/* ---------- APPOINTMENTS ---------- */
 app.post("/appointments", async (req, res) => handleCreateAppointment(req, res));
 app.post("/api/appointments", async (req, res) => handleCreateAppointment(req, res));
 
@@ -221,29 +268,84 @@ async function handleCreateAppointment(req, res) {
 
     res.json({ status: "ok", message: "Appointment booked", appointment });
   } catch (err) {
-    res.status(500).json({ status: "error", message: "Server error", error: err.message });
+    res.status(500).json({ status: "error", message: err.message });
   }
 }
 
-app.get("/appointments", authMiddleware(["patient"]), async (req, res) => {
+/* ---------- GEOFENCE ---------- */
+app.post("/api/geofence/set", authMiddleware(["patient"]), async (req, res) => {
   try {
-    const appointments = await Appointment.find({ patientId: req.user.id }).sort({ date: 1, time: 1 });
-    res.json({ status: "ok", appointments });
+    const { lat, lng } = req.body;
+    const patientId = req.user.id;
+
+    if (!lat || !lng)
+      return res.status(400).json({ status: "error", message: "Lat/Lng required" });
+
+    const geofence = await Geofence.findOneAndUpdate(
+      { patientId },
+      { geofence: { lat, lng } },
+      { new: true, upsert: true }
+    );
+
+    res.json({ status: "ok", message: "Geofence set", geofence });
   } catch (err) {
-    res.status(500).json({ status: "error", message: "Server error" });
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-app.get("/appointments/all", authMiddleware(["doctor"]), async (_req, res) => {
+app.post("/api/geofence/update-location", authMiddleware(["patient"]), async (req, res) => {
   try {
-    const appointments = await Appointment.find().sort({ createdAt: -1 });
-    res.json({ status: "ok", appointments });
+    const { lat, lng } = req.body;
+    const patientId = req.user.id;
+
+    if (!lat || !lng)
+      return res.status(400).json({ status: "error", message: "Lat/Lng required" });
+
+    const geofenceData = await Geofence.findOneAndUpdate(
+      { patientId },
+      { currentLocation: { lat, lng } },
+      { new: true, upsert: true }
+    );
+
+    if (!geofenceData?.geofence) {
+      return res.json({ status: "ok", message: "No geofence set yet" });
+    }
+
+    const { geofence } = geofenceData;
+
+    const withinGeofence =
+      Math.abs(lat - geofence.lat) < 0.01 &&
+      Math.abs(lng - geofence.lng) < 0.01;
+
+    if (!withinGeofence) {
+      // Save alert in DB
+      await Alert.create({
+        patientId,
+        type: "geofence",
+        message: "⚠ Patient has left the geofenced area!",
+      });
+    }
+
+    res.json({ status: "ok", withinGeofence, geofence: geofenceData.geofence });
   } catch (err) {
-    res.status(500).json({ status: "error", message: "Server error" });
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Start server
+/* ---------- ALERTS ---------- */
+app.get("/api/alerts", authMiddleware(["patient", "doctor"]), async (req, res) => {
+  try {
+    const query = req.user.role === "patient" ? { patientId: req.user.id } : {};
+    const alerts = await Alert.find(query).sort({ createdAt: -1 }).populate("patientId", "name email phone");
+    res.json({ status: "ok", alerts });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+/* ================================
+   START SERVER
+================================ */
 app.listen(PORT, () => {
   console.log(`🚀 Patient API running on port ${PORT}`);
 });
