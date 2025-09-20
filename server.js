@@ -300,6 +300,19 @@ app.post("/api/geofence/set", authMiddleware(["patient"]), async (req, res) => {
     res.status(500).json({ status: "error", message: err.message });
   }
 });
+app.get("/api/geofence/get", authMiddleware(["patient"]), async (req, res) => {
+  try {
+    const patientId = req.user.id;
+    const geofenceData = await Geofence.findOne({ patientId });
+    if (!geofenceData) {
+      return res.json({ status: "ok", geofence: null });
+    }
+    res.json({ status: "ok", geofence: geofenceData.geofence });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
 
 app.post("/api/geofence/update-location", authMiddleware(["patient"]), async (req, res) => {
   try {
