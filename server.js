@@ -372,10 +372,8 @@ app.post("/api/alerts/send-sms", authMiddleware(["patient"]), async (req, res) =
       return res.status(400).json({ status: "error", message: "Relative phone not set" });
     }
 
-    const { hospitalName = "Unknown Hospital" } = req.body;
-
     const message = await twilioClient.messages.create({
-      body: `🚨 Emergency Alert: ${patient.name} is unresponsive at ${hospitalName}. Please respond immediately.`,
+      body: `🚨 Alert: ${patient.name} is outside the designated safe zone. Please check on them immediately.`,
       from: process.env.TWILIO_PHONE,
       to: patient.relativePhone,
     });
@@ -387,6 +385,7 @@ app.post("/api/alerts/send-sms", authMiddleware(["patient"]), async (req, res) =
   }
 });
 
+
 app.post("/api/alerts/make-call", authMiddleware(["patient"]), async (req, res) => {
   try {
     const patient = await Patient.findById(req.user.id);
@@ -395,7 +394,7 @@ app.post("/api/alerts/make-call", authMiddleware(["patient"]), async (req, res) 
     }
 
     const call = await twilioClient.calls.create({
-      twiml: "<Response><Say>🚨 Emergency Alert. Please check your patient immediately.</Say></Response>",
+      twiml: `<Response><Say>🚨 Alert. ${patient.name} has exited the safe zone. Please check on them immediately.</Say></Response>`,
       from: process.env.TWILIO_PHONE,
       to: patient.relativePhone,
     });
@@ -406,6 +405,7 @@ app.post("/api/alerts/make-call", authMiddleware(["patient"]), async (req, res) 
     res.status(500).json({ status: "error", message: err.message });
   }
 });
+
 
 /* ================================
    START SERVER
