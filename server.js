@@ -4,6 +4,7 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import twilio from "twilio"; // ✅ Twilio added
 
 dotenv.config();
 
@@ -12,6 +13,9 @@ const PORT = process.env.PORT || 10001;
 const MONGO_URI =
   process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/elderEase";
 const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key";
+
+// ✅ Twilio client
+const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH);
 
 // Middleware
 app.use(express.json());
@@ -46,6 +50,7 @@ const PatientSchema = new mongoose.Schema(
     age: { type: Number },
     gender: { type: String, enum: ["male", "female", "other"] },
     phone: { type: String, unique: true },
+    relativePhone: { type: String, default: "" }, // ✅ NEW FIELD
     condition: { type: String, default: "" },
     ongoingTreatment: { type: String, default: "" },
     lastVisit: { type: Date, default: null },
@@ -146,7 +151,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 /* ---------- AUTH ---------- */
 app.post("/signup", async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, age, gender, phone } = req.body;
+    const { name, email, password, confirmPassword, age, gender, phone, relativePhone } = req.body;
 
     if (!name || !email || !password || !confirmPassword || !age || !gender || !phone)
       return res.status(400).json({ status: "error", message: "All fields required" });
@@ -173,6 +178,7 @@ app.post("/signup", async (req, res) => {
       age,
       gender,
       phone,
+      relativePhone, // ✅ store relative phone
       status: "new",
     });
 
@@ -186,6 +192,7 @@ app.post("/signup", async (req, res) => {
         age: patient.age,
         gender: patient.gender,
         phone: patient.phone,
+        relativePhone: patient.relativePhone,
         role: "patient",
       },
     });
@@ -219,6 +226,7 @@ app.post("/login", async (req, res) => {
         age: patient.age,
         gender: patient.gender,
         phone: patient.phone,
+        relativePhone: patient.relativePhone,
         role: "patient",
       },
     });
@@ -336,9 +344,52 @@ app.post("/api/geofence/update-location", authMiddleware(["patient"]), async (re
 app.get("/api/alerts", authMiddleware(["patient", "doctor"]), async (req, res) => {
   try {
     const query = req.user.role === "patient" ? { patientId: req.user.id } : {};
-    const alerts = await Alert.find(query).sort({ createdAt: -1 }).populate("patientId", "name email phone");
+    const alerts = await Alert.find(query).sort({ createdAt: -1 }).populate("patientId", "name email phone relativePhone");
     res.json({ status: "ok", alerts });
   } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+/* ---------- TWILIO ALERTS ---------- */
+app.post("/api/alerts/send-sms", authMiddleware(["patient"]), async (req, res) => {
+  try {
+    const patient = await Patient.findById(req.user.id);
+    if (!patient?.relativePhone) {
+      return res.status(400).json({ status: "error", message: "Relative phone not set" });
+    }
+
+    const { hospitalName = "Unknown Hospital" } = req.body;
+
+    const message = await twilioClient.messages.create({
+      body: `🚨 Emergency Alert: ${patient.name} is unresponsive at ${hospitalName}. Please respond immediately.`,
+      from: process.env.TWILIO_PHONE,
+      to: patient.relativePhone,
+    });
+
+    res.json({ status: "ok", sid: message.sid });
+  } catch (err) {
+    console.error("❌ SMS Error:", err);
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+app.post("/api/alerts/make-call", authMiddleware(["patient"]), async (req, res) => {
+  try {
+    const patient = await Patient.findById(req.user.id);
+    if (!patient?.relativePhone) {
+      return res.status(400).json({ status: "error", message: "Relative phone not set" });
+    }
+
+    const call = await twilioClient.calls.create({
+      twiml: "<Response><Say>🚨 Emergency Alert. Please check your patient immediately.</Say></Response>",
+      from: process.env.TWILIO_PHONE,
+      to: patient.relativePhone,
+    });
+
+    res.json({ status: "ok", sid: call.sid });
+  } catch (err) {
+    console.error("❌ Call Error:", err);
     res.status(500).json({ status: "error", message: err.message });
   }
 });
