@@ -4,7 +4,7 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-import twilio from "twilio"; // ✅ Twilio added
+import twilio from "twilio";
 
 dotenv.config();
 
@@ -14,10 +14,8 @@ const MONGO_URI =
   process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/elderEase";
 const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key";
 
-// ✅ Twilio client
 const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH);
 
-// Middleware
 app.use(express.json());
 app.use(
   cors({
@@ -30,7 +28,6 @@ app.use(
   })
 );
 
-// MongoDB Connection
 mongoose
   .connect(MONGO_URI, {
     useNewUrlParser: true,
@@ -39,9 +36,7 @@ mongoose
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-/* ================================
-   SCHEMAS & MODELS
-================================ */
+/* SCHEMAS */
 const PatientSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -50,7 +45,7 @@ const PatientSchema = new mongoose.Schema(
     age: { type: Number },
     gender: { type: String, enum: ["male", "female", "other"] },
     phone: { type: String, unique: true },
-    relativePhone: { type: String, default: "" }, // ✅ NEW FIELD
+    relativePhone: { type: String, default: "" },
     condition: { type: String, default: "" },
     ongoingTreatment: { type: String, default: "" },
     lastVisit: { type: Date, default: null },
@@ -100,19 +95,27 @@ const AlertSchema = new mongoose.Schema(
   { collection: "alerts" }
 );
 
-// Models
-const Patient =
-  mongoose.models.Patient || mongoose.model("Patient", PatientSchema);
-const Appointment =
-  mongoose.models.Appointment || mongoose.model("Appointment", AppointmentSchema);
-const Geofence =
-  mongoose.models.Geofence || mongoose.model("Geofence", GeofenceSchema);
-const Alert =
-  mongoose.models.Alert || mongoose.model("Alert", AlertSchema);
+// Reminder schema
+const ReminderSchema = new mongoose.Schema(
+  {
+    patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient", required: true },
+    title: { type: String, required: true },
+    description: { type: String, default: "" },
+    date: { type: String, required: true }, // 'YYYY-MM-DD'
+    time: { type: String, required: true }, // 'HH:mm'
+    completed: { type: Boolean, default: false },
+  },
+  { collection: "reminders", timestamps: true }
+);
 
-/* ================================
-   AUTH HELPERS
-================================ */
+/* MODELS */
+const Patient = mongoose.models.Patient || mongoose.model("Patient", PatientSchema);
+const Appointment = mongoose.models.Appointment || mongoose.model("Appointment", AppointmentSchema);
+const Geofence = mongoose.models.Geofence || mongoose.model("Geofence", GeofenceSchema);
+const Alert = mongoose.models.Alert || mongoose.model("Alert", AlertSchema);
+const Reminder = mongoose.models.Reminder || mongoose.model("Reminder", ReminderSchema);
+
+/* AUTH HELPERS */
 function parseAuthToken(req) {
   const authHeader =
     req.headers.authorization || req.headers["x-access-token"] || "";
@@ -143,12 +146,11 @@ const authMiddleware = (roles = []) => {
   };
 };
 
-/* ================================
-   ROUTES
-================================ */
+/* ROUTES */
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-/* ---------- AUTH ---------- */
+/* AUTH */
 app.post("/signup", async (req, res) => {
   try {
     const { name, email, password, confirmPassword, age, gender, phone, relativePhone } = req.body;
@@ -178,7 +180,7 @@ app.post("/signup", async (req, res) => {
       age,
       gender,
       phone,
-      relativePhone, // ✅ store relative phone
+      relativePhone,
       status: "new",
     });
 
@@ -236,7 +238,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-/* ---------- PROFILE ---------- */
+/* PROFILE */
 app.get("/profile", authMiddleware(["patient"]), async (req, res) => {
   try {
     const patient = await Patient.findById(req.user.id).select("-password");
@@ -247,7 +249,7 @@ app.get("/profile", authMiddleware(["patient"]), async (req, res) => {
   }
 });
 
-/* ---------- APPOINTMENTS ---------- */
+/* APPOINTMENTS */
 app.post("/appointments", async (req, res) => handleCreateAppointment(req, res));
 app.post("/api/appointments", async (req, res) => handleCreateAppointment(req, res));
 
@@ -280,7 +282,7 @@ async function handleCreateAppointment(req, res) {
   }
 }
 
-/* ---------- GEOFENCE ---------- */
+/* GEOFENCE */
 app.post("/api/geofence/set", authMiddleware(["patient"]), async (req, res) => {
   try {
     const { lat, lng } = req.body;
@@ -300,6 +302,7 @@ app.post("/api/geofence/set", authMiddleware(["patient"]), async (req, res) => {
     res.status(500).json({ status: "error", message: err.message });
   }
 });
+
 app.get("/api/geofence/get", authMiddleware(["patient"]), async (req, res) => {
   try {
     const patientId = req.user.id;
@@ -312,7 +315,6 @@ app.get("/api/geofence/get", authMiddleware(["patient"]), async (req, res) => {
     res.status(500).json({ status: "error", message: err.message });
   }
 });
-
 
 app.post("/api/geofence/update-location", authMiddleware(["patient"]), async (req, res) => {
   try {
@@ -339,7 +341,6 @@ app.post("/api/geofence/update-location", authMiddleware(["patient"]), async (re
       Math.abs(lng - geofence.lng) < 0.01;
 
     if (!withinGeofence) {
-      // Save alert in DB
       await Alert.create({
         patientId,
         type: "geofence",
@@ -353,7 +354,7 @@ app.post("/api/geofence/update-location", authMiddleware(["patient"]), async (re
   }
 });
 
-/* ---------- ALERTS ---------- */
+/* ALERTS */
 app.get("/api/alerts", authMiddleware(["patient", "doctor"]), async (req, res) => {
   try {
     const query = req.user.role === "patient" ? { patientId: req.user.id } : {};
@@ -364,7 +365,7 @@ app.get("/api/alerts", authMiddleware(["patient", "doctor"]), async (req, res) =
   }
 });
 
-/* ---------- TWILIO ALERTS ---------- */
+/* TWILIO ALERTS */
 app.post("/api/alerts/send-sms", authMiddleware(["patient"]), async (req, res) => {
   try {
     const patient = await Patient.findById(req.user.id);
@@ -385,31 +386,79 @@ app.post("/api/alerts/send-sms", authMiddleware(["patient"]), async (req, res) =
   }
 });
 
+/* REMINDERS */
 
-app.post("/api/alerts/make-call", authMiddleware(["patient"]), async (req, res) => {
+// Create reminder
+app.post("/api/reminders", authMiddleware(["patient"]), async (req, res) => {
   try {
-    const patient = await Patient.findById(req.user.id);
-    if (!patient?.relativePhone) {
-      return res.status(400).json({ status: "error", message: "Relative phone not set" });
-    }
+    const { title, description, date, time } = req.body;
+    if (!title || !date || !time)
+      return res.status(400).json({ status: "error", message: "Title, date and time required" });
 
-    const call = await twilioClient.calls.create({
-      twiml: `<Response><Say>🚨 Alert. ${patient.name} has exited the safe zone. Please check on them immediately.</Say></Response>`,
-      from: process.env.TWILIO_PHONE,
-      to: patient.relativePhone,
+    const reminder = await Reminder.create({
+      patientId: req.user.id,
+      title,
+      description,
+      date,
+      time,
+      completed: false,
     });
 
-    res.json({ status: "ok", sid: call.sid });
+    res.json({ status: "ok", reminder });
   } catch (err) {
-    console.error("❌ Call Error:", err);
     res.status(500).json({ status: "error", message: err.message });
   }
 });
 
+// Get reminders for patient
+app.get("/api/reminders", authMiddleware(["patient"]), async (req, res) => {
+  try {
+    const reminders = await Reminder.find({ patientId: req.user.id }).sort({ date: 1, time: 1 });
+    res.json({ status: "ok", reminders });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
 
-/* ================================
-   START SERVER
-================================ */
+// Update reminder (e.g., mark completed)
+app.put("/api/reminders/:id", authMiddleware(["patient"]), async (req, res) => {
+  try {
+    const reminderId = req.params.id;
+    const updates = req.body;
+
+    const reminder = await Reminder.findOneAndUpdate(
+      { _id: reminderId, patientId: req.user.id },
+      updates,
+      { new: true }
+    );
+
+    if (!reminder) {
+      return res.status(404).json({ status: "error", message: "Reminder not found" });
+    }
+
+    res.json({ status: "ok", reminder });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+// Delete reminder
+app.delete("/api/reminders/:id", authMiddleware(["patient"]), async (req, res) => {
+  try {
+    const reminderId = req.params.id;
+
+    const reminder = await Reminder.findOneAndDelete({ _id: reminderId, patientId: req.user.id });
+
+    if (!reminder) {
+      return res.status(404).json({ status: "error", message: "Reminder not found" });
+    }
+
+    res.json({ status: "ok", message: "Reminder deleted" });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Patient API running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
