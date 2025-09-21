@@ -164,9 +164,6 @@ app.post("/signup", async (req, res) => {
     if (password.length < 6)
       return res.status(400).json({ status: "error", message: "Password must be at least 6 characters" });
 
-    if (!/^\d{14}$/.test(phone))
-      return res.status(400).json({ status: "error", message: "Invalid phone number" });
-
     const existing = await Patient.findOne({ $or: [{ email }, { phone }] });
     if (existing)
       return res.status(400).json({ status: "error", message: "User with this email or phone exists" });
